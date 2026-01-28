@@ -304,5 +304,42 @@ def load_graph(
         raise typer.Exit(1)
 
 
+@app.command()
+def discover_personas(
+    min_cluster_size: int = typer.Option(
+        50,
+        "--min-cluster-size",
+        help="Minimum HDBSCAN cluster size",
+    ),
+    min_samples: int = typer.Option(
+        10,
+        "--min-samples",
+        help="Minimum samples for HDBSCAN core points",
+    ),
+    target_personas: int = typer.Option(
+        8,
+        "--target-personas",
+        help="Target number of personas (guideline)",
+    ),
+) -> None:
+    """Discover customer personas using hybrid clustering."""
+    from ragrec.personas import discover_and_store_personas
+
+    try:
+        asyncio.run(
+            discover_and_store_personas(
+                min_cluster_size=min_cluster_size,
+                min_samples=min_samples,
+                target_personas=target_personas,
+            )
+        )
+    except KeyboardInterrupt:
+        console.print("\n[bold red]Interrupted by user[/bold red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"\n[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()
