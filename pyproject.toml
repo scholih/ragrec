@@ -1,7 +1,86 @@
 [project]
 name = "ragrec"
 version = "0.1.0"
-description = "Add your description here"
+description = "Multi-modal e-retail recommendation system with visual similarity, customer personas, and GraphRAG reasoning"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    # Core Framework
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.1.0",
+
+    # Data Processing
+    "polars>=0.20.0",
+    "pyarrow>=15.0.0",
+
+    # ML & Embeddings
+    "torch>=2.2.0",
+    "transformers>=4.37.0",
+    "sentence-transformers>=2.3.0",
+    "pillow>=10.2.0",
+
+    # Vector Stores
+    "pgvector>=0.2.4",
+    "asyncpg>=0.29.0",
+    "qdrant-client>=1.7.0",
+
+    # Graph Database
+    "neo4j>=5.16.0",
+
+    # Clustering & ML
+    "scikit-learn>=1.4.0",
+    "hdbscan>=0.8.33",
+    "networkx>=3.2",
+
+    # HTTP & Async
+    "httpx>=0.26.0",
+    "aiofiles>=23.2.1",
+
+    # Utilities
+    "python-dotenv>=1.0.0",
+    "orjson>=3.9.0",
+    "typer>=0.9.0",
+    "rich>=13.7.0",
+
+    # UI (optional)
+    "streamlit>=1.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.2.0",
+    "mypy>=1.8.0",
+    "ipython>=8.21.0",
+]
+
+[project.scripts]
+ragrec = "ragrec.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "ANN", "ASYNC", "S", "B", "A", "C4", "RET", "SIM", "ARG"]
+ignore = ["ANN101", "ANN102", "S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --cov=ragrec --cov-report=term-missing"

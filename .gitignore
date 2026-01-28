@@ -68,3 +68,6 @@ profile.*
 
 # uv
 uv.lock
+
+# Git worktrees
+.worktrees/
