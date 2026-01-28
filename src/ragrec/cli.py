@@ -1,5 +1,8 @@
 """CLI application for RagRec."""
 
+import asyncio
+from pathlib import Path
+
 import typer
 from rich.console import Console
 
@@ -38,6 +41,34 @@ def version() -> None:
     from ragrec import __version__
 
     console.print(f"[bold]RagRec[/bold] version [green]{__version__}[/green]")
+
+
+@app.command()
+def load_data(
+    data_path: Path = typer.Argument(
+        ...,
+        help="Path to directory containing Parquet files (e.g., data/sample)",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+    ),
+    clear: bool = typer.Option(
+        False,
+        "--clear",
+        help="Clear existing data before loading",
+    ),
+) -> None:
+    """Load H&M data into PostgreSQL database."""
+    from ragrec.etl import load_hm_data
+
+    try:
+        asyncio.run(load_hm_data(data_path, clear_first=clear))
+    except KeyboardInterrupt:
+        console.print("\n[bold red]Interrupted by user[/bold red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"\n[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
