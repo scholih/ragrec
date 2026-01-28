@@ -71,5 +71,44 @@ def load_data(
         raise typer.Exit(1)
 
 
+@app.command()
+def generate_embeddings(
+    images_dir: Path = typer.Argument(
+        ...,
+        help="Path to directory containing product images (e.g., data/sample/images)",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+    ),
+    model: str = typer.Option(
+        "google/siglip-base-patch16-224",
+        "--model",
+        help="SigLIP model identifier from HuggingFace",
+    ),
+    batch_size: int = typer.Option(
+        32,
+        "--batch-size",
+        help="Number of images to process per batch",
+    ),
+) -> None:
+    """Generate SigLIP embeddings for product images."""
+    from ragrec.embeddings import generate_product_embeddings
+
+    try:
+        asyncio.run(
+            generate_product_embeddings(
+                images_dir,
+                model_name=model,
+                batch_size=batch_size,
+            )
+        )
+    except KeyboardInterrupt:
+        console.print("\n[bold red]Interrupted by user[/bold red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"\n[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()
