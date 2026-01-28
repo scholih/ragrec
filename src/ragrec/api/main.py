@@ -5,7 +5,8 @@ from typing import Annotated
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from ragrec.recommender import VisualRecommender
+from ragrec.graph.client import Neo4jClient
+from ragrec.recommender import CollaborativeRecommender, VisualRecommender
 from ragrec.vectorstore import PgVectorStore
 
 app = FastAPI(
@@ -58,12 +59,20 @@ async def health_check() -> HealthResponse:
     except Exception:
         pass
 
+    # Check Neo4j
+    neo4j_healthy = False
+    try:
+        async with Neo4jClient() as client:
+            neo4j_healthy = await client.health_check()
+    except Exception:
+        pass
+
     return HealthResponse(
-        status="ok" if postgres_healthy else "degraded",
+        status="ok" if (postgres_healthy and neo4j_healthy) else "degraded",
         version="0.1.0",
         services={
             "postgres": postgres_healthy,
-            "neo4j": False,  # Will check in Phase 2
+            "neo4j": neo4j_healthy,
         },
     )
 
@@ -139,3 +148,183 @@ async def find_similar_products(
         count=len(products),
         query_time_ms=query_time_ms,
     )
+
+
+# Graph-based recommendation endpoints
+
+
+@app.get("/api/v1/graph/neighborhood/{product_id}")
+async def get_product_neighborhood(
+    product_id: int,
+    depth: int = 2,
+) -> dict:
+    """
+    Get product's graph neighborhood.
+
+    Returns related products via visual similarity, category, and co-purchases.
+
+    Args:
+        product_id: Article ID of the product
+        depth: Maximum traversal depth (default: 2, max: 3)
+
+    Returns:
+        Product neighborhood with similar, co-purchased, and same-category products
+    """
+    async with CollaborativeRecommender() as recommender:
+        neighborhood = await recommender.get_product_neighborhood(
+            product_id=product_id,
+            depth=min(depth, 3),
+        )
+
+    if not neighborhood:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Product {product_id} not found in graph",
+        )
+
+    return neighborhood
+
+
+@app.get("/api/v1/graph/journey/{customer_id}")
+async def get_customer_journey(
+    customer_id: str,
+    limit: int = 50,
+) -> dict:
+    """
+    Get customer's purchase journey over time.
+
+    Args:
+        customer_id: Customer ID
+        limit: Maximum number of purchases to return (default: 50)
+
+    Returns:
+        Customer's purchase history ordered by timestamp
+    """
+    async with CollaborativeRecommender() as recommender:
+        journey_df = await recommender.get_customer_journey(
+            customer_id=customer_id,
+            limit=limit,
+        )
+
+    return {
+        "customer_id": customer_id,
+        "purchases": journey_df.to_dicts(),
+        "count": len(journey_df),
+    }
+
+
+@app.get("/api/v1/collaborative/{customer_id}")
+async def get_collaborative_recommendations(
+    customer_id: str,
+    top_k: int = 10,
+    min_shared_purchases: int = 2,
+) -> dict:
+    """
+    Get collaborative filtering recommendations.
+
+    Finds products purchased by customers with similar purchase history.
+
+    Args:
+        customer_id: Customer ID
+        top_k: Number of recommendations (default: 10)
+        min_shared_purchases: Minimum shared purchases to consider (default: 2)
+
+    Returns:
+        Recommended products with scores
+    """
+    async with CollaborativeRecommender() as recommender:
+        recommendations_df = await recommender.recommend_for_customer(
+            customer_id=customer_id,
+            top_k=top_k,
+            min_shared_purchases=min_shared_purchases,
+        )
+
+    return {
+        "customer_id": customer_id,
+        "recommendations": recommendations_df.to_dicts(),
+        "count": len(recommendations_df),
+    }
+
+
+@app.get("/api/v1/complementary/{product_id}")
+async def get_complementary_products(
+    product_id: int,
+    top_k: int = 5,
+    min_co_purchases: int = 2,
+) -> dict:
+    """
+    Get complementary product recommendations.
+
+    Finds products frequently bought together with the given product.
+
+    Args:
+        product_id: Article ID of the product
+        top_k: Number of recommendations (default: 5)
+        min_co_purchases: Minimum co-purchases to consider (default: 2)
+
+    Returns:
+        Complementary products with co-purchase counts
+    """
+    async with CollaborativeRecommender() as recommender:
+        complementary_df = await recommender.recommend_complementary(
+            product_id=product_id,
+            top_k=top_k,
+            min_co_purchases=min_co_purchases,
+        )
+
+    return {
+        "product_id": product_id,
+        "complementary": complementary_df.to_dicts(),
+        "count": len(complementary_df),
+    }
+
+
+@app.get("/api/v1/trending")
+async def get_trending_products(
+    days: int = 7,
+    top_k: int = 10,
+) -> dict:
+    """
+    Get trending products based on recent purchases.
+
+    Args:
+        days: Number of days to look back (default: 7)
+        top_k: Number of products to return (default: 10)
+
+    Returns:
+        Trending products with recent purchase counts
+    """
+    async with CollaborativeRecommender() as recommender:
+        trending_df = await recommender.get_trending(
+            days=days,
+            top_k=top_k,
+        )
+
+    return {
+        "trending": trending_df.to_dicts(),
+        "count": len(trending_df),
+        "period_days": days,
+    }
+
+
+@app.get("/api/v1/graph/product/{product_id}/stats")
+async def get_product_stats(product_id: int) -> dict:
+    """
+    Get statistics for a product.
+
+    Args:
+        product_id: Article ID of the product
+
+    Returns:
+        Product statistics including purchase count, unique customers, etc.
+    """
+    async with CollaborativeRecommender() as recommender:
+        stats = await recommender.get_product_stats(product_id=product_id)
+
+    if not stats:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Product {product_id} not found in graph",
+        )
+
+    return stats
