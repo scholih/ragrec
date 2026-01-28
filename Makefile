@@ -46,7 +46,7 @@ health-check: ## Check health of all services
 	@curl -s http://localhost:7474 > /dev/null && echo "✓ Neo4j is running" || echo "✗ Neo4j is not running"
 	@echo ""
 	@echo "Checking API health endpoint..."
-	@curl -s http://localhost:8000/api/v1/health > /dev/null && echo "✓ API is running" || echo "✗ API is not running"
+	@curl -s http://localhost:9010/api/v1/health > /dev/null && echo "✓ API is running" || echo "✗ API is not running"
 
 setup: ## Run native setup script (install PostgreSQL, Neo4j, etc.)
 	@bash scripts/setup_native.sh

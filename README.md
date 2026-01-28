@@ -50,6 +50,19 @@ make test
 make health-check
 ```
 
+### Port Allocation
+
+RagRec uses **port range 9010-9019** (see `~/portranges_map.yaml` for system-wide allocation):
+
+| Port | Service | URL |
+|------|---------|-----|
+| 9010 | API | http://localhost:9010 |
+| 9011 | API (dev) | http://localhost:9011 |
+| 9012 | Streamlit UI | http://localhost:9012 |
+| 5432 | PostgreSQL | (shared Homebrew service) |
+| 7474 | Neo4j Browser | http://localhost:7474 |
+| 7687 | Neo4j Bolt | bolt://localhost:7687 |
+
 ## Architecture
 
 ```
