@@ -110,5 +110,85 @@ def generate_embeddings(
         raise typer.Exit(1)
 
 
+@app.command()
+def create_index(
+    ef_construction: int = typer.Option(
+        128,
+        "--ef-construction",
+        help="HNSW ef_construction parameter (higher = better recall)",
+    ),
+    m: int = typer.Option(
+        16,
+        "--m",
+        help="HNSW m parameter (connections per layer)",
+    ),
+) -> None:
+    """Create HNSW index on embedding column for fast similarity search."""
+    from ragrec.vectorstore import PgVectorStore
+
+    async def _create_index() -> None:
+        console.print("[bold blue]Creating HNSW index...[/bold blue]")
+        console.print(f"  Parameters: ef_construction={ef_construction}, m={m}")
+
+        async with PgVectorStore() as store:
+            await store.create_hnsw_index(ef_construction=ef_construction, m=m)
+            stats = await store.get_index_stats()
+
+        console.print("[bold green]✓ HNSW index created successfully![/bold green]")
+        console.print(f"  Index size: {stats['size']}")
+        console.print(f"  Total embeddings: {stats['total_embeddings']:,}")
+
+    try:
+        asyncio.run(_create_index())
+    except Exception as e:
+        console.print(f"\n[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+
+@app.command()
+def search(
+    image_path: Path = typer.Argument(
+        ...,
+        help="Path to query image",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+    ),
+    top_k: int = typer.Option(
+        10,
+        "--top-k",
+        help="Number of similar products to return",
+    ),
+) -> None:
+    """Search for visually similar products using an image."""
+    from ragrec.embeddings import SigLIPEmbedder
+    from ragrec.vectorstore import PgVectorStore
+
+    async def _search() -> None:
+        # Load embedder
+        console.print("[bold blue]Loading SigLIP model...[/bold blue]")
+        embedder = SigLIPEmbedder()
+
+        # Encode query image
+        console.print(f"[bold blue]Encoding query image: {image_path.name}[/bold blue]")
+        image_bytes = image_path.read_bytes()
+        query_embedding = embedder.encode_image(image_bytes)
+
+        # Search for similar products
+        console.print(f"[bold blue]Searching for top {top_k} similar products...[/bold blue]")
+        async with PgVectorStore() as store:
+            results = await store.search(query_embedding.tolist(), top_k=top_k)
+
+        # Display results
+        console.print("\n[bold green]Search Results:[/bold green]")
+        console.print(results)
+
+    try:
+        asyncio.run(_search())
+    except Exception as e:
+        console.print(f"\n[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()
