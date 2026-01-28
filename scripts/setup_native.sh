@@ -32,6 +32,9 @@ else
     brew install postgresql@16
 fi
 
+# Add PostgreSQL to PATH (keg-only formula)
+export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
+
 # Start PostgreSQL
 echo "Starting PostgreSQL..."
 brew services start postgresql@16
@@ -48,8 +51,8 @@ done
 
 # Create database and user
 echo "Creating ragrec database and user..."
-psql -U postgres -c "CREATE USER ragrec WITH PASSWORD 'changeme';" 2>/dev/null || echo "  User 'ragrec' already exists"
-psql -U postgres -c "CREATE DATABASE ragrec OWNER ragrec;" 2>/dev/null || echo "  Database 'ragrec' already exists"
+psql postgres -c "CREATE USER ragrec WITH PASSWORD 'changeme';" 2>/dev/null || echo "  User 'ragrec' already exists"
+psql postgres -c "CREATE DATABASE ragrec OWNER ragrec;" 2>/dev/null || echo "  Database 'ragrec' already exists"
 
 # Install pgvector extension
 echo "Installing pgvector extension..."
@@ -61,12 +64,12 @@ fi
 
 # Enable pgvector in database
 echo "Enabling pgvector extension in database..."
-psql -U postgres -d ragrec -c "CREATE EXTENSION IF NOT EXISTS vector;"
+psql ragrec -c "CREATE EXTENSION IF NOT EXISTS vector;"
 echo "✓ pgvector extension enabled"
 
 # Verify pgvector
 echo "Verifying pgvector installation..."
-PGVECTOR_VERSION=$(psql -U postgres -d ragrec -tAc "SELECT extversion FROM pg_extension WHERE extname='vector';")
+PGVECTOR_VERSION=$(psql ragrec -tAc "SELECT extversion FROM pg_extension WHERE extname='vector';")
 echo "✓ pgvector version: $PGVECTOR_VERSION"
 
 # Install Neo4j
