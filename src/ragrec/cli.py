@@ -241,5 +241,31 @@ def similar(
         raise typer.Exit(1)
 
 
+@app.command()
+def load_graph(
+    clear: bool = typer.Option(
+        False,
+        "--clear",
+        help="Clear existing graph data before loading",
+    ),
+    top_k_similar: int = typer.Option(
+        5,
+        "--top-k-similar",
+        help="Number of similar products per product to create SIMILAR_TO edges",
+    ),
+) -> None:
+    """Load data from PostgreSQL into Neo4j graph database."""
+    from ragrec.etl.graph_loader import load_graph_from_postgres
+
+    try:
+        asyncio.run(load_graph_from_postgres(clear_first=clear, top_k_similar=top_k_similar))
+    except KeyboardInterrupt:
+        console.print("\n[bold red]Interrupted by user[/bold red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"\n[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()
