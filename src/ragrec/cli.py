@@ -159,32 +159,83 @@ def search(
         "--top-k",
         help="Number of similar products to return",
     ),
+    category: str = typer.Option(
+        None,
+        "--category",
+        help="Filter by product category (e.g., 'Trousers', 'Dress')",
+    ),
 ) -> None:
     """Search for visually similar products using an image."""
-    from ragrec.embeddings import SigLIPEmbedder
-    from ragrec.vectorstore import PgVectorStore
+    from ragrec.recommender import VisualRecommender
 
     async def _search() -> None:
-        # Load embedder
-        console.print("[bold blue]Loading SigLIP model...[/bold blue]")
-        embedder = SigLIPEmbedder()
-
-        # Encode query image
-        console.print(f"[bold blue]Encoding query image: {image_path.name}[/bold blue]")
-        image_bytes = image_path.read_bytes()
-        query_embedding = embedder.encode_image(image_bytes)
+        # Load recommender
+        console.print("[bold blue]Loading visual recommender...[/bold blue]")
 
         # Search for similar products
         console.print(f"[bold blue]Searching for top {top_k} similar products...[/bold blue]")
-        async with PgVectorStore() as store:
-            results = await store.search(query_embedding.tolist(), top_k=top_k)
+        image_bytes = image_path.read_bytes()
+
+        async with VisualRecommender() as recommender:
+            results = await recommender.find_similar(
+                image_bytes=image_bytes,
+                top_k=top_k,
+                category_filter=category,
+            )
 
         # Display results
         console.print("\n[bold green]Search Results:[/bold green]")
-        console.print(results)
+        if not results.is_empty():
+            console.print(results)
+        else:
+            console.print("[yellow]No results found matching criteria[/yellow]")
 
     try:
         asyncio.run(_search())
+    except Exception as e:
+        console.print(f"\n[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+
+@app.command()
+def similar(
+    product_id: int = typer.Argument(
+        ...,
+        help="Article ID of the reference product",
+    ),
+    top_k: int = typer.Option(
+        10,
+        "--top-k",
+        help="Number of similar products to return",
+    ),
+    category: str = typer.Option(
+        None,
+        "--category",
+        help="Filter by product category",
+    ),
+) -> None:
+    """Find products similar to an existing product by ID."""
+    from ragrec.recommender import VisualRecommender
+
+    async def _similar() -> None:
+        console.print(f"[bold blue]Finding products similar to {product_id}...[/bold blue]")
+
+        async with VisualRecommender() as recommender:
+            results = await recommender.find_similar_by_id(
+                product_id=product_id,
+                top_k=top_k,
+                category_filter=category,
+            )
+
+        # Display results
+        console.print("\n[bold green]Similar Products:[/bold green]")
+        if not results.is_empty():
+            console.print(results)
+        else:
+            console.print("[yellow]No similar products found or product ID not in database[/yellow]")
+
+    try:
+        asyncio.run(_similar())
     except Exception as e:
         console.print(f"\n[bold red]Error:[/bold red] {e}")
         raise typer.Exit(1)
