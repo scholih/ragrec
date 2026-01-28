@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+.eggs/
+*.egg-info/
+*.egg
+
+# Environment
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Type checking
+.mypy_cache/
+.pytype/
+
+# Build
+dist/
+build/
+*.manifest
+*.spec
+
+# Data (large files)
+data/hm/
+data/embeddings/
+*.csv
+!data/sample/**/*.csv
+
+# Keep sample data
+!data/sample/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+logs/
+*.log
+
+# n8n credentials (sensitive)
+n8n/credentials/
+
+# Qdrant data
+data/qdrant/
+
+# Profiling
+*.svg
+profile.*
+
+# uv
+uv.lock
