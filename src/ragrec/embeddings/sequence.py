@@ -78,10 +78,8 @@ class BehaviorEncoder:
         # Project to lower dimension
         behavior_embedding = weighted_avg @ self.projection
 
-        # L2 normalize
-        norm = np.linalg.norm(behavior_embedding)
-        if norm > 0:
-            behavior_embedding = behavior_embedding / norm
+        # NOTE: Removed L2 normalization to preserve magnitude information
+        # (purchase volume, recency strength) which helps HDBSCAN clustering
 
         return behavior_embedding
 

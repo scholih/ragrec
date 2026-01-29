@@ -201,5 +201,210 @@ async def generate_customer_behavior_embeddings(
     }
 
 
+async def generate_category_behavior_embeddings(
+    batch_size: int = 100,
+    min_purchases: int = 1,
+    recency_halflife_days: float = 30.0,
+) -> dict[str, int]:
+    """Generate category-based behavior embeddings for all customers.
+
+    Uses purchase category distributions instead of visual embeddings.
+    More interpretable and preserves behavioral diversity.
+
+    Args:
+        batch_size: Number of customers to process per batch
+        min_purchases: Minimum purchases required
+        recency_halflife_days: Days for recency weight to decay to 0.5
+
+    Returns:
+        Dict with counts of customers processed
+    """
+    from ragrec.embeddings.category_behavior import CategoryBehaviorEncoder
+    
+    config = ETLConfig()
+
+    console.print("[bold blue]Generating category-based behavior embeddings...[/bold blue]")
+    console.print(f"  Recency halflife: {recency_halflife_days} days")
+
+    # Connect to PostgreSQL
+    pool = await asyncpg.create_pool(config.database_url)
+
+    # Get all unique categories from products
+    async with pool.acquire() as conn:
+        sections = await conn.fetch(
+            "SELECT DISTINCT 'section_' || section_no::text AS cat_id FROM products WHERE section_no IS NOT NULL"
+        )
+        garment_groups = await conn.fetch(
+            "SELECT DISTINCT 'garment_' || garment_group_no::text AS cat_id FROM products WHERE garment_group_no IS NOT NULL"
+        )
+        product_types = await conn.fetch(
+            "SELECT DISTINCT 'type_' || product_type_no::text AS cat_id FROM products WHERE product_type_no IS NOT NULL"
+        )
+
+    categories = {
+        "section": [row["cat_id"] for row in sections],
+        "garment_group": [row["cat_id"] for row in garment_groups],
+        "product_type": [row["cat_id"] for row in product_types],
+    }
+
+    console.print(f"  Categories: {len(sections)} sections, {len(garment_groups)} garment groups, {len(product_types)} product types")
+
+    encoder = CategoryBehaviorEncoder(
+        categories=categories,
+        recency_halflife_days=recency_halflife_days,
+    )
+    console.print(f"  Output dimension: {encoder.output_dim}")
+
+    # Get all customers
+    async with pool.acquire() as conn:
+        total_customers = await conn.fetchval("SELECT COUNT(*) FROM customers")
+        console.print(f"  Total customers: {total_customers:,}")
+
+        customers_with_purchases = await conn.fetch(
+            """
+            SELECT 
+                c.customer_id,
+                COUNT(t.id) AS purchase_count
+            FROM customers c
+            LEFT JOIN transactions t ON c.customer_id = t.customer_id
+            GROUP BY c.customer_id
+            ORDER BY c.customer_id
+            """
+        )
+
+    # Process in batches
+    reference_time = datetime.now()
+    processed = 0
+    embeddings_generated = 0
+    zero_embeddings = 0
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task(
+            "Processing customers...",
+            total=len(customers_with_purchases),
+        )
+
+        for i in range(0, len(customers_with_purchases), batch_size):
+            batch = customers_with_purchases[i : i + batch_size]
+            customer_ids = [row["customer_id"] for row in batch]
+
+            async with pool.acquire() as conn:
+                # Get purchases with category info for this batch
+                purchases = await conn.fetch(
+                    """
+                    SELECT 
+                        t.customer_id,
+                        t.transaction_date,
+                        'section_' || p.section_no::text AS section_cat,
+                        'garment_' || p.garment_group_no::text AS garment_cat,
+                        'type_' || p.product_type_no::text AS type_cat
+                    FROM transactions t
+                    JOIN products p ON t.article_id = p.article_id
+                    WHERE t.customer_id = ANY($1)
+                    ORDER BY t.customer_id, t.transaction_date
+                    """,
+                    customer_ids,
+                )
+
+            # Group purchases by customer
+            customer_purchases = {}
+            for purchase in purchases:
+                customer_id = purchase["customer_id"]
+                if customer_id not in customer_purchases:
+                    customer_purchases[customer_id] = {
+                        "category_ids": [],
+                        "timestamps": []
+                    }
+
+                # Add all three category levels for this purchase
+                for cat in [purchase["section_cat"], purchase["garment_cat"], purchase["type_cat"]]:
+                    if cat and cat != 'section_None' and cat != 'garment_None' and cat != 'type_None':
+                        customer_purchases[customer_id]["category_ids"].append(cat)
+                        
+                        # Convert date to datetime
+                        transaction_date = purchase["transaction_date"]
+                        if hasattr(transaction_date, 'date'):
+                            timestamp = transaction_date
+                        else:
+                            from datetime import time
+                            timestamp = datetime.combine(transaction_date, time())
+                        customer_purchases[customer_id]["timestamps"].append(timestamp)
+
+            # Generate embeddings for each customer in batch
+            embeddings_to_store = []
+            for customer_id in customer_ids:
+                if customer_id in customer_purchases and len(customer_purchases[customer_id]["category_ids"]) >= min_purchases * 3:  # 3 categories per purchase
+                    # Generate category histogram embedding
+                    embedding = encoder.encode_purchases(
+                        category_ids=customer_purchases[customer_id]["category_ids"],
+                        timestamps=customer_purchases[customer_id]["timestamps"],
+                        reference_time=reference_time,
+                    )
+                    embeddings_generated += 1
+                else:
+                    # Zero embedding for customers with insufficient purchases
+                    embedding = np.zeros(encoder.output_dim, dtype=np.float32)
+                    zero_embeddings += 1
+
+                embeddings_to_store.append({
+                    "customer_id": customer_id,
+                    "embedding": embedding.tolist(),
+                })
+
+            # Store embeddings in database
+            async with pool.acquire() as conn:
+                for row in embeddings_to_store:
+                    embedding_str = "[" + ",".join(map(str, row["embedding"])) + "]"
+                    await conn.execute(
+                        """
+                        UPDATE customers
+                        SET behavior_embedding = $1::vector
+                        WHERE customer_id = $2
+                        """,
+                        embedding_str,
+                        row["customer_id"],
+                    )
+
+            processed += len(batch)
+            progress.update(task, advance=len(batch))
+
+    await pool.close()
+
+    console.print(f"\n[bold green]✓ Category behavior embedding generation complete![/bold green]")
+    console.print(f"  Processed: {processed:,} customers")
+    console.print(f"  Generated: {embeddings_generated:,} behavior embeddings")
+    console.print(f"  Zero embeddings: {zero_embeddings:,} (customers with <{min_purchases} purchases)")
+
+    # Recreate HNSW index on behavior_embedding
+    console.print("\n[bold blue]Recreating HNSW index on behavior embeddings...[/bold blue]")
+    pool = await asyncpg.create_pool(config.database_url)
+    async with pool.acquire() as conn:
+        await conn.execute("DROP INDEX IF EXISTS idx_customers_behavior_hnsw")
+        await conn.execute(
+            """
+            CREATE INDEX idx_customers_behavior_hnsw 
+            ON customers 
+            USING hnsw (behavior_embedding vector_cosine_ops)
+            WITH (m = 16, ef_construction = 64)
+            """
+        )
+
+    await pool.close()
+
+    console.print("[bold green]✓ HNSW index created[/bold green]")
+
+    return {
+        "total_customers": processed,
+        "embeddings_generated": embeddings_generated,
+        "zero_embeddings": zero_embeddings,
+    }
+
+
 if __name__ == "__main__":
     asyncio.run(generate_customer_behavior_embeddings())

@@ -356,29 +356,89 @@ class PersonaDiscovery:
         top_categories: list[str],
         demographics: Any,
     ) -> str:
-        """Generate a descriptive persona name."""
+        """Generate a human-centric persona name.
+        
+        Format: "{Gender}, {Generation}, {Style}"
+        Examples: "Female, Gen Z, Feminine Chic"
+                 "Male, Millennial, Casual Sporty"
+        """
         if not top_categories:
             return "Casual Shoppers"
 
-        # Use top category as base
-        primary_category = top_categories[0]
+        # Infer gender from product categories
+        female_indicators = {
+            "dress", "skirt", "bra", "bikini", "leggings", "blouse",
+            "cardigan", "balconette", "underwear top", "underwear tights"
+        }
+        male_indicators = {
+            "blazer", "shirt", "tie", "shorts", "vest", "outdoor"
+        }
+        
+        category_text = " ".join(top_categories).lower()
+        
+        if any(ind in category_text for ind in female_indicators):
+            gender = "Female"
+        elif any(ind in category_text for ind in male_indicators):
+            gender = "Male"
+        else:
+            gender = "Unisex"
 
-        # Add demographic context
+        # Map age to generation
         avg_age = demographics["avg_age"]
-        if avg_age and avg_age < 30:
-            age_prefix = "Young"
-        elif avg_age and avg_age > 50:
-            age_prefix = "Mature"
+        if avg_age:
+            if avg_age < 28:
+                generation = "Gen Z"
+            elif avg_age < 43:
+                generation = "Millennial"
+            elif avg_age < 59:
+                generation = "Gen X"
+            else:
+                generation = "Boomer"
         else:
-            age_prefix = ""
+            generation = "Millennial"  # Default
 
-        # Simplify category name
-        category_simple = primary_category.replace(" ", "").replace("/", "")[:15]
+        # Infer detailed style from top category
+        # Use the primary category to create unique personas
+        primary_cat = top_categories[0].lower() if top_categories else "general"
+        
+        # Map specific categories to style attributes
+        style_map = {
+            "trousers": "Casual Bottom-Focused",
+            "dress": "Feminine Dressy",
+            "bra": "Intimate Essentials",
+            "bikini": "Beachwear Lover",
+            "bikinitop": "Swimwear Focused",
+            "top": "Top-Focused Trendy",
+            "t-shirt": "Casual T-Shirt",
+            "sweater": "Cozy Knitwear",
+            "jacket": "Outerwear Focused",
+            "skirt": "Feminine Skirt",
+            "shirt": "Classic Buttoned",
+            "blouse": "Feminine Elegant",
+            "underwear": "Intimate Comfort",
+            "leggings": "Active Comfort",
+            "cardigan": "Layering Essential",
+        }
+        
+        # Find matching style
+        style = None
+        for key, val in style_map.items():
+            if key in primary_cat:
+                style = val
+                break
+        
+        if not style:
+            # Fallback to generic style inference
+            if "dress" in category_text or "skirt" in category_text:
+                style = "Feminine Chic"
+            elif "sport" in category_text or "legging" in category_text:
+                style = "Active Sporty"
+            elif "underwear" in category_text or "bra" in category_text:
+                style = "Intimate Focused"
+            else:
+                style = "Casual Versatile"
 
-        if age_prefix:
-            return f"{age_prefix} {category_simple} Fans"
-        else:
-            return f"{category_simple} Enthusiasts"
+        return f"{gender}, {generation}, {style}"
 
     def _generate_persona_description(
         self,
@@ -387,28 +447,39 @@ class PersonaDiscovery:
         avg_purchases: float,
         avg_spend: float,
     ) -> str:
-        """Generate a descriptive persona description."""
+        """Generate a human-centric persona description."""
         desc_parts = []
-
-        # Category preferences
-        if top_categories:
-            categories_str = ", ".join(top_categories[:3])
-            desc_parts.append(f"Primarily interested in: {categories_str}")
 
         # Demographics
         if demographics["avg_age"]:
-            desc_parts.append(f"Average age: {demographics['avg_age']:.0f}")
-
-        # Engagement
-        if demographics["club_ratio"] and demographics["club_ratio"] > 0.5:
-            desc_parts.append("Highly engaged club members")
+            desc_parts.append(f"Average age: {demographics['avg_age']:.0f} years")
 
         # Purchase behavior
         if avg_purchases > 5:
-            desc_parts.append(f"Frequent shoppers ({avg_purchases:.1f} purchases/customer)")
+            frequency = "frequent" if avg_purchases > 50 else "regular"
+            desc_parts.append(f"{frequency.title()} shopper with {avg_purchases:.0f} purchases")
 
-        if avg_spend > 200:
-            desc_parts.append(f"High spenders (€{avg_spend:.0f}/customer)")
+        # Spending pattern
+        if avg_spend:
+            if avg_spend > 500:
+                spend_level = "high-value"
+            elif avg_spend > 200:
+                spend_level = "moderate"
+            else:
+                spend_level = "budget-conscious"
+            desc_parts.append(f"{spend_level} customer (€{avg_spend:.0f} lifetime)")
+
+        # Engagement
+        if demographics["club_ratio"] and demographics["club_ratio"] > 0.6:
+            desc_parts.append("active loyalty program member")
+        
+        if demographics["news_ratio"] and demographics["news_ratio"] > 0.5:
+            desc_parts.append("engaged with fashion trends")
+
+        # Category preferences (product-level detail)
+        if top_categories:
+            categories_str = ", ".join(top_categories[:3])
+            desc_parts.append(f"Prefers: {categories_str}")
 
         return ". ".join(desc_parts) + "."
 

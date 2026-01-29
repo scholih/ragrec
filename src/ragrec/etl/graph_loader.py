@@ -331,66 +331,104 @@ class GraphLoader:
     ) -> int:
         """Load SIMILAR_TO relationships from visual similarity.
 
-        Queries PostgreSQL for top-k most similar products for each product
-        based on embedding cosine distance.
+        Uses pgvector HNSW index for efficient k-NN search with parallel queries.
 
         Args:
             top_k: Number of similar products per product
-            batch_size: Number of relationships per batch
+            batch_size: Number of relationships per Neo4j batch
 
         Returns:
             Total relationships created
         """
         console.print(f"[bold blue]Loading SIMILAR_TO relationships (top-{top_k})...[/bold blue]")
 
-        # Fetch visual similarities from PostgreSQL
-        pool = await asyncpg.create_pool(self.pg_config.database_url)
+        pool = await asyncpg.create_pool(
+            self.pg_config.database_url,
+            min_size=10,
+            max_size=20,
+        )
+        
+        # Get all product IDs with embeddings
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                WITH similarities AS (
+            product_ids = await conn.fetch(
+                "SELECT article_id FROM product_embeddings ORDER BY article_id"
+            )
+        product_ids = [row["article_id"] for row in product_ids]
+        console.print(f"  Found {len(product_ids):,} products with embeddings")
+
+        # Compute similarities using HNSW index with parallel queries
+        all_similarities = []
+        
+        async def get_similar_products(product_id: int) -> list[dict]:
+            """Get top-k similar products for one product using HNSW index."""
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
                     SELECT
-                        pe1.article_id AS product_id,
                         pe2.article_id AS similar_id,
                         pe1.embedding <=> pe2.embedding AS distance
                     FROM product_embeddings pe1
-                    CROSS JOIN product_embeddings pe2
-                    WHERE pe1.article_id != pe2.article_id
-                ),
-                ranked AS (
-                    SELECT
-                        product_id,
-                        similar_id,
-                        distance,
-                        ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY distance) AS rank
-                    FROM similarities
-                )
-                SELECT
+                    CROSS JOIN LATERAL (
+                        SELECT article_id, embedding
+                        FROM product_embeddings
+                        WHERE article_id != $1
+                        ORDER BY embedding <=> (
+                            SELECT embedding FROM product_embeddings WHERE article_id = $1
+                        )
+                        LIMIT $2
+                    ) pe2
+                    WHERE pe1.article_id = $1
+                    """,
                     product_id,
-                    similar_id,
-                    distance
-                FROM ranked
-                WHERE rank <= {top_k}
-                ORDER BY product_id, distance
-                """
+                    top_k,
+                )
+                
+                return [
+                    {
+                        "product_id": product_id,
+                        "similar_id": row["similar_id"],
+                        "score": 1.0 - float(row["distance"]),
+                    }
+                    for row in rows
+                ]
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task(
+                f"Computing top-{top_k} similarities (parallel)...",
+                total=len(product_ids),
             )
+            
+            # Process in parallel batches of 100 concurrent queries
+            parallel_batch_size = 100
+            for i in range(0, len(product_ids), parallel_batch_size):
+                batch_ids = product_ids[i : i + parallel_batch_size]
+                
+                # Run queries in parallel
+                results = await asyncio.gather(
+                    *[get_similar_products(pid) for pid in batch_ids]
+                )
+                
+                # Flatten results
+                for similarities in results:
+                    all_similarities.extend(similarities)
+                
+                progress.update(task, advance=len(batch_ids))
+            
+            progress.update(task, completed=len(product_ids))
+        
         await pool.close()
 
-        similarities = [
-            {
-                "product_id": row["product_id"],
-                "similar_id": row["similar_id"],
-                "score": 1.0 - float(row["distance"]),  # Convert distance to similarity score
-            }
-            for row in rows
-        ]
-
-        console.print(f"  Computed {len(similarities)} similarities from embeddings")
+        console.print(f"  Computed {len(all_similarities):,} similarities")
 
         # Batch import to Neo4j
+        console.print(f"  Loading similarities to Neo4j...")
         total = 0
-        for i in range(0, len(similarities), batch_size):
-            batch = similarities[i : i + batch_size]
+        for i in range(0, len(all_similarities), batch_size):
+            batch = all_similarities[i : i + batch_size]
             await self.neo4j_client.execute_write(
                 schema.CREATE_SIMILAR_TO_RELATIONSHIPS,
                 {"similarities": batch},

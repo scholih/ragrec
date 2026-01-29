@@ -147,6 +147,44 @@ def generate_behavior_embeddings(
         raise typer.Exit(1)
 
 
+
+@app.command()
+def generate_category_behavior_embeddings(
+    batch_size: int = typer.Option(
+        100,
+        "--batch-size",
+        help="Number of customers to process per batch",
+    ),
+    min_purchases: int = typer.Option(
+        1,
+        "--min-purchases",
+        help="Minimum purchases required",
+    ),
+    recency_halflife_days: float = typer.Option(
+        30.0,
+        "--recency-halflife",
+        help="Days for recency weight to decay to 0.5",
+    ),
+) -> None:
+    """Generate category-based behavior embeddings from purchase history."""
+    from ragrec.etl.behavior_embeddings import generate_category_behavior_embeddings
+
+    try:
+        asyncio.run(
+            generate_category_behavior_embeddings(
+                batch_size=batch_size,
+                min_purchases=min_purchases,
+                recency_halflife_days=recency_halflife_days,
+            )
+        )
+    except KeyboardInterrupt:
+        console.print("\n[bold red]Interrupted by user[/bold red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"\n[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+
 @app.command()
 def create_index(
     ef_construction: int = typer.Option(
